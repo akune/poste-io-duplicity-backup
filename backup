@@ -1,0 +1,80 @@
+#!/bin/bash
+#
+# Simple script for creating backups with Duplicity.
+# Full backups are made on the 1st day of each month or with the 'full' option.
+# Incremental backups are made on any other days.
+#
+# USAGE: backup.sh [full]
+#
+
+if [ ! $(which duplicity) ]; then 
+  apt-get -y install duplicity python-paramiko
+fi
+
+# get day of the month
+DATE=`date +%d`
+
+# Set protocol (use scp for sftp and ftp for FTP, see manpage for more)
+BPROTO=sftp
+
+# set user and hostname of backup account
+BUSER='u129130'
+BHOST='u129130.your-storagebox.de'
+
+# directories to backup (but . for /)
+BDIRS="srv"
+TDIR=backup/`hostname`
+LOGDIR='/var/log/duplicity'
+if [ ! -d $LOGDIR ]; then
+  mkdir -p $LOGDIR
+fi
+
+# Setting the pass phrase to encrypt the backup files. Will use symmetrical keys in this case.
+source ~/.backup.properties
+export PASSPHRASE
+echo $PASSPHRASE
+
+# encryption algorithm for gpg, disable for default (CAST5)
+# see available ones via 'gpg --version'
+ALGO=AES
+
+##############################
+
+if [ $ALGO ]; then
+ GPGOPT="--gpg-options '--cipher-algo $ALGO'"
+fi
+
+if [ $BPASSWORD ]; then
+ BAC="$BPROTO://$BUSER:$BPASSWORD@$BHOST"
+else
+ BAC="$BPROTO://$BUSER@$BHOST"
+fi
+
+# Check to see if we're at the first of the month.
+# If we are on the 1st day of the month, then run
+# a full backup. If not, then run an incremental
+# backup.
+
+if [ $DATE = 01 ] || [ "$1" = 'full' ]; then
+ TYPE='full'
+fi
+
+for DIR in $BDIRS
+do
+  # first remove everything older than 2 months
+  CMD="duplicity -v9 remove-older-than 2M -v5 --force $BAC/$TDIR/$DIR >> $LOGDIR/$DIR.log"
+  echo $CMD >> $LOGDIR/$DIR.log
+  eval $CMD
+
+  # do a backup
+  CMD="duplicity -v9 $TYPE -v5 $GPGOPT /$DIR $BAC/$TDIR/$DIR >> $LOGDIR/$DIR.log"
+  echo $CMD >> $LOGDIR/$DIR.log
+  eval  $CMD
+
+done
+
+# Check the manpage for all available options for Duplicity.
+# Unsetting the confidential variables
+unset PASSPHRASE
+
+exit 0
